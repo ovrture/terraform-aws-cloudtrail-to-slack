@@ -27,7 +27,8 @@ default_rules.append('event["eventName"] == "ConsoleLogin" ' +
 # about not logged in actions since there are a lot of scans for open buckets that generate noise
 default_rules.append('event.get("errorCode", "") == "UnauthorizedOperation"')
 default_rules.append('event.get("errorCode", "") == "AccessDenied" ' +
-                     'and (event.get("userIdentity.accountId", "") != "ANONYMOUS_PRINCIPAL")')
+                     'and (event.get("userIdentity.accountId", "") != "ANONYMOUS_PRINCIPAL")'
+                     'and (event.get("userIdentity.accountId", "") != "123104204098")')
 # Notify about all non-read actions done by root
 default_rules.append('event.get("userIdentity.type", "") == "Root" ' +
                      'and not event["eventName"].startswith(("Get", "List", "Describe", "Head"))')
