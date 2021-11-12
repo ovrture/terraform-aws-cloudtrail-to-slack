@@ -15,6 +15,7 @@ module "lambda" {
     {
       HOOK_URL        = var.default_slack_hook_url
       RULES           = var.rules
+      IGNORE_RULES    = var.ignore_rules
       EVENTS_TO_TRACK = var.events_to_track
       CONFIGURATION   = var.configuration != null ? jsonencode(var.configuration) : ""
     },
@@ -44,6 +45,27 @@ data "aws_iam_policy_document" "s3" {
       "${data.aws_s3_bucket.cloudtrail.arn}/*",
     ]
   }
+  dynamic "statement" {
+    for_each = var.cloudtrail_logs_kms_key_id != "" ? { create = true } : {}
+    content {
+      sid = "AllowLambdaToUseKMSKey"
+
+      actions = [
+        "kms:Decrypt",
+        "kms:GenerateDataKey",
+      ]
+
+      resources = [
+        data.aws_kms_key.cloudtrail[0].arn,
+      ]
+    }
+  }
+
+}
+
+data "aws_kms_key" "cloudtrail" {
+  count  = var.cloudtrail_logs_kms_key_id != "" ? 1 : 0
+  key_id = var.cloudtrail_logs_kms_key_id
 }
 
 data "aws_s3_bucket" "cloudtrail" {

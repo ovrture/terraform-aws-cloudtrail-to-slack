@@ -1,5 +1,32 @@
 [![FivexL](https://releases.fivexl.io/fivexlbannergit.jpg)](https://fivexl.io/)
 
+<!--- Use Markdown All In One Visual Studio Code extension to refresh TOC -->
+- [Terraform module to deploy lambda that sends notifications about AWS CloudTrail events to Slack](#terraform-module-to-deploy-lambda-that-sends-notifications-about-aws-cloudtrail-events-to-slack)
+  - [Why this module?](#why-this-module)
+  - [Example message](#example-message)
+  - [Delivery delays](#delivery-delays)
+- [Examples](#examples)
+  - [Module deployment with the default ruleset](#module-deployment-with-the-default-ruleset)
+  - [Separating notifications to different Slack channels](#separating-notifications-to-different-slack-channels)
+    - [Module deployment with the default ruleset and different slack channels for different accounts](#module-deployment-with-the-default-ruleset-and-different-slack-channels-for-different-accounts)
+  - [Tracking certain event types](#tracking-certain-event-types)
+  - [User defined rules to match events](#user-defined-rules-to-match-events)
+    - [Module deployment with user-defined rules, list of events to track, and default rule sets](#module-deployment-with-user-defined-rules-list-of-events-to-track-and-default-rule-sets)
+    - [Catch SSM Session events for the "111111111" account](#catch-ssm-session-events-for-the-111111111-account)
+  - [Ignore rules.](#ignore-rules)
+    - [Ignore events from the account "111111111".](#ignore-events-from-the-account-111111111)
+- [About rules and how they are applied](#about-rules-and-how-they-are-applied)
+  - [Default rules](#default-rules)
+  - [Ignore rules](#ignore-rules-1)
+- [Terraform specs](#terraform-specs)
+  - [Requirements](#requirements)
+  - [Providers](#providers)
+  - [Modules](#modules)
+  - [Resources](#resources)
+  - [Inputs](#inputs)
+  - [Outputs](#outputs)
+  - [License](#license)
+
 # Terraform module to deploy lambda that sends notifications about AWS CloudTrail events to Slack
 
 ## Why this module?
@@ -22,9 +49,9 @@ This module allows you to get notifications about:
 The current implementation built upon parsing of S3 notifications, and thus you should expect a 5 to 10 min lag between action and event notification in Slack.
 If you do not get a notification at all - check CloudWatch logs for the lambda to see if there is any issue with provided filters.
 
-## How to
+# Examples
 
-Module deployment with the default ruleset
+## Module deployment with the default ruleset
 
 ```hlc
 # we recomend storing hook url in SSM Parameter store and not commit it to the repo
@@ -50,7 +77,9 @@ resource "aws_s3_bucket" "cloudtrail" {
 }
 ```
 
-Module deployment with the default ruleset and different slack channels for different accounts
+## Separating notifications to different Slack channels
+
+### Module deployment with the default ruleset and different slack channels for different accounts
 
 ```hlc
 # we recomend storing hook url in SSM Parameter store and not commit it to the repo
@@ -96,6 +125,8 @@ resource "aws_s3_bucket" "cloudtrail" {
 }
 ```
 
+## Tracking certain event types
+
 Module deployment with the list of events to track and default rule sets
 
 ```hlc
@@ -134,7 +165,9 @@ resource "aws_s3_bucket" "cloudtrail" {
 }
 ```
 
-Module deployment with user-defined rules, list of events to track, and default rule sets
+## User defined rules to match events
+
+### Module deployment with user-defined rules, list of events to track, and default rule sets
 
 ```hlc
 # we recomend storing hook url in SSM Parameter store and not commit it to the repo
@@ -152,8 +185,10 @@ module "cloudtrail_to_slack" {
 }
 ```
 
-Catch SSM Session events for the "111111111" account
+### Catch SSM Session events for the "111111111" account
+
 ```hcl
+# Important! User defined rules should not contain comas since they are passed to lambda as coma separated string
 locals {
   cloudtrail_rules = [
       "'userIdentity.accountId' in event and event['userIdentity.accountId'] == '11111111111' and event['eventSource'] == 'ssm.amazonaws.com' and event['eventName'].endswith(('Session'))",
@@ -174,7 +209,35 @@ module "cloudtrail_to_slack" {
 }
 ```
 
-## About rules and how they are applied
+## Ignore rules.
+
+### Ignore events from the account "111111111".
+
+Note! We do recomend fixing alerts instead of ignoring them. But if there is no way you can fix it then there is a way to suppress events by providing ignore rules
+
+```hcl
+# Important! User defined rules should not contain comas since they are passed to lambda as coma separated string
+locals {
+  cloudtrail_ignore_rules = [
+      "'userIdentity.accountId' in event and event['userIdentity.accountId'] == '11111111111'",
+    ]
+}
+
+# we recomend storing hook url in SSM Parameter store and not commit it to the repo
+data "aws_ssm_parameter" "hook" {
+  name = "/cloudtrail-to-slack/hook"
+}
+
+module "cloudtrail_to_slack" {
+  source                         = "fivexl/cloudtrail-to-slack/aws"
+  version                        = "2.3.0"
+  default_slack_hook_url         = data.aws_ssm_parameter.hook.value
+  cloudtrail_logs_s3_bucket_name = aws_s3_bucket.cloudtrail.id
+  ignore_rules                   = join(",", local.cloudtrail_ignore_rules)
+}
+```
+
+# About rules and how they are applied
 
 This module comes with a set of predefined rules (default rules) that users can take advantage of.
 Rules are python strings that are evaluated in the runtime and should return the bool value.
@@ -234,9 +297,14 @@ default_rules.append('event.get("userIdentity.type", "") == "Root" ' +
                      'and not event["eventName"].startswith(("Get", "List", "Describe", "Head"))')
 ```
 
-## License
+## Ignore rules
 
-Apache 2 Licensed. See LICENSE for full details.
+User can also provide ignore rules. Ignore rules have the same syntax as a default and user defined rules mentioned above.
+But instead of generating message to Slack on match those rules will cause lambda to ignore an event.
+Ignore rules tested before default and user defined rules which means that if even is ignored by ignore rules it will not be
+tested with any other rules.
+
+# Terraform specs
 
 <!-- BEGINNING OF PRE-COMMIT-TERRAFORM DOCS HOOK -->
 ## Requirements
@@ -265,18 +333,21 @@ Apache 2 Licensed. See LICENSE for full details.
 | [aws_lambda_permission.s3](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_permission) | resource |
 | [aws_s3_bucket_notification.bucket_notification](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_notification) | resource |
 | [aws_iam_policy_document.s3](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_kms_key.cloudtrail](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/kms_key) | data source |
 | [aws_s3_bucket.cloudtrail](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/s3_bucket) | data source |
 
 ## Inputs
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
+| <a name="input_cloudtrail_logs_kms_key_id"></a> [cloudtrail\_logs\_kms\_key\_id](#input\_cloudtrail\_logs\_kms\_key\_id) | Alias, key id or key arn of the KMS Key that used for CloudTrail events | `string` | `""` | no |
 | <a name="input_cloudtrail_logs_s3_bucket_name"></a> [cloudtrail\_logs\_s3\_bucket\_name](#input\_cloudtrail\_logs\_s3\_bucket\_name) | Name of the CloudWatch log s3 bucket that contains CloudTrail events | `string` | n/a | yes |
 | <a name="input_configuration"></a> [configuration](#input\_configuration) | Allows to configure slack web hook url per account(s) so you can separate events from different accounts to different channels. Useful in context of AWS organization | <pre>list(object({<br>    accounts       = list(string)<br>    slack_hook_url = string<br>  }))</pre> | `null` | no |
 | <a name="input_dead_letter_target_arn"></a> [dead\_letter\_target\_arn](#input\_dead\_letter\_target\_arn) | The ARN of an SNS topic or SQS queue to notify when an invocation fails. | `string` | `null` | no |
 | <a name="input_default_slack_hook_url"></a> [default\_slack\_hook\_url](#input\_default\_slack\_hook\_url) | Slack incoming webhook URL to be used if AWS account id does not match any account id from configuration variable | `string` | n/a | yes |
 | <a name="input_events_to_track"></a> [events\_to\_track](#input\_events\_to\_track) | Comma-separated list events to track and report | `string` | `""` | no |
 | <a name="input_function_name"></a> [function\_name](#input\_function\_name) | Lambda function name | `string` | `"fivexl-cloudtrail-to-slack"` | no |
+| <a name="input_ignore_rules"></a> [ignore\_rules](#input\_ignore\_rules) | Comma-separated list of rules to ignore events if you need to suppress something. Will be applied before rules and default\_rules | `string` | `""` | no |
 | <a name="input_lambda_logs_retention_in_days"></a> [lambda\_logs\_retention\_in\_days](#input\_lambda\_logs\_retention\_in\_days) | Controls for how long to keep lambda logs. | `number` | `30` | no |
 | <a name="input_lambda_timeout_seconds"></a> [lambda\_timeout\_seconds](#input\_lambda\_timeout\_seconds) | Controls lambda timeout setting. | `number` | `30` | no |
 | <a name="input_rules"></a> [rules](#input\_rules) | Comma-separated list of rules to track events if just event name is not enough | `string` | `""` | no |
@@ -289,3 +360,7 @@ Apache 2 Licensed. See LICENSE for full details.
 |------|-------------|
 | <a name="output_lambda_function_arn"></a> [lambda\_function\_arn](#output\_lambda\_function\_arn) | The ARN of the Lambda Function |
 <!-- END OF PRE-COMMIT-TERRAFORM DOCS HOOK -->
+
+## License
+
+Apache 2 Licensed. See LICENSE for full details.

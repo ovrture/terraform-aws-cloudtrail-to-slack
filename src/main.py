@@ -99,6 +99,7 @@ def lambda_handler(event, context):
 
     default_hook_url = read_env_variable_or_die('HOOK_URL')
     user_rules = os.environ.get('RULES', None)
+    ignore_rules = os.environ.get('IGNORE_RULES', "").split(",")
     use_default_rules = os.environ.get('USE_DEFAULT_RULES', None)
     events_to_track = os.environ.get('EVENTS_TO_TRACK', None)
     configuration = os.environ.get('CONFIGURATION', None)
@@ -115,7 +116,7 @@ def lambda_handler(event, context):
     if not rules:
         raise Exception('Have no rules to apply!!! '
                         + 'Check configuration - add some rules or enable default rules')
-    print(f'Going to use the following rules:\n{rules}')
+    print(f'Match rules:\n{rules}\nIgnore rules:\n{ignore_rules}')
 
     records = get_cloudtrail_log_records(event)
     for record in records:
@@ -124,32 +125,37 @@ def lambda_handler(event, context):
             continue
         for log_event in record['events']:
             hook_url = get_hook_url_for_account(log_event, configuration_as_json, default_hook_url)
-            handle_event(log_event, record['key'], rules, hook_url)
+            handle_event(log_event, record['key'], rules, ignore_rules, hook_url)
 
     return 200
 
 
 # Filter out events
-def should_message_be_processed(event, rules):
+def should_message_be_processed(event, rules, ignore_rules):
     flat_event = flatten_json(event)
     user = event['userIdentity']
     event_name = event['eventName']
-    for rule in rules:
-        try:
+    try:
+        for rule in ignore_rules:
             if eval(rule, {}, {'event': flat_event}) is True:
-                print(f'Event "{flat_event}"" matched rule:\n{rule}')
-                return True
-        except Exception:
-            print(f'Event parsing failed: {sys.exc_info()[0]}. '
-                  + 'Rule: {rule}\nEvent:\n {event}\nFlat event:\n {flat_event}')
-            raise
+                print('Event matched ignore rule and will not be processed.\n' +
+                      f'Rule: {rule}\nEvent: {flat_event}')
+                return False  # do not process event
+        for rule in rules:
+            if eval(rule, {}, {'event': flat_event}) is True:
+                print(f'Event matched rule and will be processed.\nRule:{rule}\nEvent: {flat_event}')
+                return True  # do send notification about event
+    except Exception:
+        print(f'Event parsing failed: {sys.exc_info()[0]}.\n'
+              + f'Rule: {rule}\nEvent: {event}\nFlat event: {flat_event}')
+        raise
     print(f'did not match any rules: event {event_name} called by {user}')
     return False
 
 
 # Handle events
-def handle_event(event, source_file, rules, hook_url):
-    if should_message_be_processed(event, rules) is not True:
+def handle_event(event, source_file, rules, ignore_rules, hook_url):
+    if should_message_be_processed(event, rules, ignore_rules) is not True:
         return
     # log full event if it is AccessDenied
     if ('errorCode' in event and 'AccessDenied' in event['errorCode']):
@@ -285,7 +291,8 @@ def event_to_slack_message(event, source_file):
 # For local testing
 if __name__ == '__main__':
     hook_url = read_env_variable_or_die('HOOK_URL')
+    ignore_rules = ["'userIdentity.accountId' in event and event['userIdentity.accountId'] == 'YYYYYYYYYYY'"]
     with open('./test/events.json') as f:
         data = json.load(f)
     for event in data:
-        handle_event(event, 'file_name', default_rules, hook_url)
+        handle_event(event, 'file_name', default_rules, ignore_rules, hook_url)
