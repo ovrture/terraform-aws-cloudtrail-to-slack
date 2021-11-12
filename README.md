@@ -188,7 +188,7 @@ module "cloudtrail_to_slack" {
 ### Catch SSM Session events for the "111111111" account
 
 ```hcl
-# Important! User defined rules should not contain comas since they are passed to lambda as coma separated string
+# Important! User defined rules should not contain commas since they are passed to lambda as comma separated string
 locals {
   cloudtrail_rules = [
       "'userIdentity.accountId' in event and event['userIdentity.accountId'] == '11111111111' and event['eventSource'] == 'ssm.amazonaws.com' and event['eventName'].endswith(('Session'))",
